@@ -12,6 +12,8 @@ export type ReplaySample = {
   x: number;
   y: number;
   speedKph: number;
+  lapNumber?: number;
+  compound?: string;
 };
 
 export type PositionTimelinePoint = {

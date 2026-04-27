@@ -11,6 +11,8 @@ type ProjectedSample = {
   x: number;
   y: number;
   speedKph: number;
+  lapNumber?: number;
+  compound?: string;
 };
 
 type ProjectedDriverReplay = {
@@ -59,6 +61,37 @@ function formatLapTime(totalMs: number): string {
   const seconds = Math.floor((clamped % 60000) / 1000);
   const millis = clamped % 1000;
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(millis).padStart(3, "0")}`;
+}
+
+function formatRaceTime(totalMs: number): string {
+  const clamped = Math.max(0, Math.floor(totalMs));
+  const hours = Math.floor(clamped / 3600000);
+  const minutes = Math.floor((clamped % 3600000) / 60000);
+  const seconds = Math.floor((clamped % 60000) / 1000);
+  const millis = clamped % 1000;
+  return `${String(hours)}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}:${String(millis).padStart(3, "0")}`;
+}
+
+function getCompoundColor(compound?: string): string {
+  if (!compound) return "#a1a5b8";
+  const upper = compound.toUpperCase();
+  if (upper.includes("SOFT") || upper === "S") return "#ff0000";
+  if (upper.includes("MEDIUM") || upper === "M") return "#ffff00";
+  if (upper.includes("HARD") || upper === "H") return "#ffffff";
+  if (upper.includes("INTERMEDIATE") || upper === "I") return "#00ff00";
+  if (upper.includes("WET") || upper === "W") return "#0000ff";
+  return "#a1a5b8";
+}
+
+function getCompoundLabel(compound?: string): string {
+  if (!compound) return "";
+  const upper = compound.toUpperCase();
+  if (upper.includes("SOFT") || upper === "S") return "S";
+  if (upper.includes("MEDIUM") || upper === "M") return "M";
+  if (upper.includes("HARD") || upper === "H") return "H";
+  if (upper.includes("INTERMEDIATE") || upper === "I") return "I";
+  if (upper.includes("WET") || upper === "W") return "W";
+  return compound[0]?.toUpperCase() ?? "";
 }
 
 function formatInterval(intervalMs: number): string {
@@ -569,6 +602,20 @@ export function ReplayBoard({
       const finished = timerMs >= driver.lapTimeMs - 1;
       const livePosition = hasRacePositions ? getPositionAtTime(driver.positionTimeline, replayMs) : null;
       const timingMarkMs = hasRacePositions ? getTimingMarkAtTime(driver.positionTimeline, replayMs) : null;
+      
+      // Get current lap number and compound from samples
+      let currentLapNumber: number | undefined;
+      let currentCompound: string | undefined;
+      if (selectedMode === "race" && Array.isArray(driver.samples)) {
+        for (let i = driver.samples.length - 1; i >= 0; i -= 1) {
+          const sample = driver.samples[i];
+          if (sample.tMs <= timerMs) {
+            currentLapNumber = sample.lapNumber;
+            currentCompound = sample.compound;
+            break;
+          }
+        }
+      }
 
       return {
         driverCode: driver.driverCode,
@@ -580,6 +627,8 @@ export function ReplayBoard({
         livePosition,
         timingMarkMs,
         finishPosition: driver.finishPosition ?? null,
+        currentLapNumber,
+        currentCompound,
       };
     });
 
@@ -648,13 +697,17 @@ export function ReplayBoard({
             ? index === 0
               ? "LEADER"
               : formatInterval(gapToLeaderMs)
-            : formatLapTime(allFinished ? row.lapTimeMs : row.timerMs),
+            : selectedMode === "race" && allFinished
+              ? formatRaceTime(row.lapTimeMs)
+              : formatLapTime(allFinished ? row.lapTimeMs : row.timerMs),
         statusLabel:
           index === 0
             ? allFinished
               ? "WINNER"
               : "LEADER"
             : formatInterval(gapToAheadMs),
+        currentLapNumber: row.currentLapNumber,
+        currentCompound: row.currentCompound,
       };
     });
   }, [activeDrivers, allFinished, liveStateByCode, replayMs, selectedMode]);
@@ -734,9 +787,26 @@ export function ReplayBoard({
               <div className="flex items-center gap-2 text-white">
                 <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: row.color }} />
                 <span className="font-semibold">{row.driverCode}</span>
+                {row.currentCompound && (
+                  <span
+                    className="ml-1 h-4 w-4 rounded-full flex items-center justify-center text-[10px] font-bold"
+                    style={{
+                      backgroundColor: getCompoundColor(row.currentCompound),
+                      color: row.currentCompound?.toUpperCase().includes("YELLOW") || row.currentCompound?.toUpperCase().includes("MEDIUM") ? "black" : "white",
+                    }}
+                    title={row.currentCompound}
+                  >
+                    {getCompoundLabel(row.currentCompound)}
+                  </span>
+                )}
               </div>
               <div className="text-right text-xs text-zinc-300">
-                <div>{row.displayValue}</div>
+                <div className="flex items-center justify-end gap-2">
+                  <span>{row.displayValue}</span>
+                  {row.currentLapNumber !== undefined && selectedMode === "race" && (
+                    <span className="text-zinc-400 text-[10px]">L{row.currentLapNumber}</span>
+                  )}
+                </div>
                 <div className="text-zinc-500">{row.statusLabel}</div>
               </div>
             </div>
@@ -830,7 +900,7 @@ export function ReplayBoard({
             </div>
             <input type="range" min={0} max={maxLapTimeMs} step={1} value={Math.min(replayMs, maxLapTimeMs)} onChange={(event) => setReplayMs(Number.parseInt(event.target.value, 10))} />
             <div className="text-sm text-zinc-200">
-              Global replay: {formatLapTime(replayMs)} ({selectedMode === "race" ? "Race" : "Qualifying"})
+              Global replay: {selectedMode === "race" ? formatRaceTime(replayMs) : formatLapTime(replayMs)} ({selectedMode === "race" ? "Race" : "Qualifying"})
             </div>
           </div>
           {mode === "compare" ? (
