@@ -89,6 +89,7 @@ export default async function Home({ searchParams }: HomePageProps) {
             width: geometry.width,
             height: geometry.height,
             path: geometry.path,
+            points: geometry.points,
           }}
           drivers={projectedDrivers}
         />

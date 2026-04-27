@@ -36,6 +36,7 @@ type ReplayBoardProps = {
     width: number;
     height: number;
     path: string;
+    points: { x: number; y: number }[];
   };
   drivers: ProjectedDriverReplay[];
 };
@@ -47,6 +48,7 @@ type DriverLiveState = {
   speedKph: number;
   x: number;
   y: number;
+  trackProgress: number;
   finished: boolean;
   lapTimeMs: number;
 };
@@ -60,12 +62,28 @@ function formatLapTime(totalMs: number): string {
 }
 
 function formatInterval(intervalMs: number): string {
-  if (intervalMs <= 0) {
-    return "LEADER";
+  const seconds = Math.max(0, intervalMs) / 1000;
+  return `+${seconds.toFixed(3)}s`;
+}
+
+function getTrackProgress(x: number, y: number, points: { x: number; y: number }[]): number {
+  if (points.length === 0) {
+    return 0;
   }
 
-  const seconds = intervalMs / 1000;
-  return `+${seconds.toFixed(3)}s`;
+  let closestIndex = 0;
+  let closestDist = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < points.length; i += 1) {
+    const dx = points[i].x - x;
+    const dy = points[i].y - y;
+    const dist = dx * dx + dy * dy;
+    if (dist < closestDist) {
+      closestDist = dist;
+      closestIndex = i;
+    }
+  }
+
+  return closestIndex / Math.max(points.length - 1, 1);
 }
 
 function normalizeSamples(samples: ProjectedSample[]): ProjectedSample[] {
@@ -518,12 +536,13 @@ export function ReplayBoard({
           speedKph: smoothed.speedKph,
           x: smoothed.x,
           y: smoothed.y,
+          trackProgress: getTrackProgress(smoothed.x, smoothed.y, geometry.points),
           finished: replayMs >= driver.lapTimeMs,
           lapTimeMs: driver.lapTimeMs,
         };
       })
       .filter((driver): driver is DriverLiveState => driver !== null);
-  }, [activeDrivers, replayMs]);
+  }, [activeDrivers, replayMs, geometry.points]);
 
   const liveStateByCode = useMemo(() => {
     return new Map(liveDrivers.map((driver) => [driver.driverCode, driver]));
@@ -538,8 +557,9 @@ export function ReplayBoard({
       return [];
     }
 
+    const isRaceLive = selectedMode === "race" && !allFinished;
     const hasRacePositions =
-      selectedMode === "race" &&
+      isRaceLive &&
       activeDrivers.some((driver) => Array.isArray(driver.positionTimeline) && driver.positionTimeline.length > 0);
 
     const baseRows = activeDrivers.map((driver) => {
@@ -571,8 +591,16 @@ export function ReplayBoard({
         return a.lapTimeMs - b.lapTimeMs;
       }
 
-      if (hasRacePositions && a.livePosition !== null && b.livePosition !== null && a.livePosition !== b.livePosition) {
-        return a.livePosition - b.livePosition;
+      if (isRaceLive) {
+        if (a.livePosition !== null && b.livePosition !== null && a.livePosition !== b.livePosition) {
+          return a.livePosition - b.livePosition;
+        }
+
+        const aTrack = (liveStateByCode.get(a.driverCode)?.trackProgress ?? 0);
+        const bTrack = (liveStateByCode.get(b.driverCode)?.trackProgress ?? 0);
+        if (aTrack !== bTrack) {
+          return bTrack - aTrack;
+        }
       }
 
       if (a.finished !== b.finished) {
@@ -609,14 +637,14 @@ export function ReplayBoard({
         : 0;
 
       return {
-        position: hasRacePositions && !allFinished && row.livePosition !== null ? row.livePosition : index + 1,
+        position: index + 1,
         driverCode: row.driverCode,
         color: row.color,
         lapTimeMs: row.lapTimeMs,
         intervalMs: gapToLeaderMs,
         displayTimeMs: allFinished ? row.lapTimeMs : row.timerMs,
         displayValue:
-          selectedMode === "race" && !allFinished
+          isRaceLive
             ? index === 0
               ? "LEADER"
               : formatInterval(gapToLeaderMs)
